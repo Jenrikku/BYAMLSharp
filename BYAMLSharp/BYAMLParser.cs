@@ -1,0 +1,743 @@
+using BYAMLSharp.Ext;
+using BYAMLSharp.Utils;
+using static BYAMLSharp.Utils.ValueParser;
+
+using System.Text;
+
+namespace BYAMLSharp;
+
+public static class BYAMLParser
+{
+    private static readonly Dictionary<uint, BYAMLNode> s_byRefNodes = new();
+    private static readonly List<(uint NodePos, object Value)> s_byRefValues = new();
+
+    public static unsafe BYAML Read(ReadOnlySpan<byte> data, Encoding? encoding = null)
+    {
+        fixed (byte* ptr = data)
+            return Read(ptr);
+    }
+
+    public static unsafe BYAML Read(byte* start, Encoding? encoding = null)
+    {
+        s_byRefNodes.Clear();
+
+        BYAML byaml = new();
+
+        if (encoding is not null)
+            byaml.Encoding = encoding;
+
+        byte* ptr = start;
+
+        ushort magic = ReadValue<ushort>(ref ptr, false);
+
+        byaml.IsBigEndian = magic == BYAML.Magic;
+
+        bool diffByteOrder = BitConverter.IsLittleEndian == byaml.IsBigEndian;
+
+        byaml.Version = ReadValue<ushort>(ref ptr, diffByteOrder);
+
+        uint[] offsets = new uint[4];
+
+        for (byte i = 0; i < 3; i++)
+        {
+            // MK's BYAML Check:
+            if (i == 2)
+            {
+                uint offset = ReadValue<uint>(ref ptr, diffByteOrder);
+                BYAMLNodeType type = ReadNodeTypeByRef(start, offset);
+
+                ptr -= 4;
+
+                if (type != BYAMLNodeType.PathTable)
+                    continue;
+
+                byaml.IsMKBYAML = true;
+            }
+
+            offsets[i] = ReadValue<uint>(ref ptr, diffByteOrder);
+        }
+
+        byaml.DictionaryKeyTable = ReadNodeByRef(ref byaml, start, offsets[0], diffByteOrder);
+
+        byaml.StringTable = ReadNodeByRef(ref byaml, start, offsets[1], diffByteOrder);
+
+        byaml.PathTable = ReadNodeByRef(ref byaml, start, offsets[2], diffByteOrder);
+
+        byaml.RootNode = ReadNodeByRef(ref byaml, start, offsets[3], diffByteOrder);
+
+        return byaml;
+    }
+
+    public static unsafe byte[] Write(in BYAML byaml)
+    {
+        byte[] data = new byte[CalculateTotalSize(in byaml)];
+
+        fixed (byte* ptr = data)
+            Write(byaml, ptr);
+
+        return data;
+    }
+
+    public static unsafe void Write(BYAML byaml, byte* start)
+    {
+        s_byRefValues.Clear();
+
+        byte* ptr = start;
+
+        bool reverse = BitConverter.IsLittleEndian == byaml.IsBigEndian;
+
+        WriteValue(ref ptr, BYAML.Magic, reverse);
+        WriteValue(ref ptr, byaml.Version, reverse);
+
+        if (byaml.RootNode is null)
+            return;
+
+        GenerateTables(
+            byaml.RootNode,
+            byaml.IsMKBYAML,
+            out BYAMLNode? keyTableNode,
+            out BYAMLNode? strTableNode,
+            out BYAMLNode? pathTableNode
+        );
+
+        WriteNode(ref ptr, start, keyTableNode, in byaml, reverse);
+        WriteNode(ref ptr, start, strTableNode, in byaml, reverse);
+        WriteNode(ref ptr, start, pathTableNode, in byaml, reverse);
+        WriteNode(ref ptr, start, byaml.RootNode, in byaml, reverse);
+
+        byaml.DictionaryKeyTable = keyTableNode;
+        byaml.StringTable = strTableNode;
+        byaml.PathTable = pathTableNode;
+
+        while (s_byRefValues.Count > 0)
+        {
+            var (pos, value) = s_byRefValues[0];
+
+            WriteNodeRefValue(ref ptr, start, pos, value, in byaml, reverse);
+
+            s_byRefValues.RemoveAt(0);
+        }
+    }
+
+    private static unsafe BYAMLNode ReadNode(
+        ref BYAML byaml,
+        ref byte* ptr,
+        byte* start,
+        BYAMLNodeType type,
+        bool reverse
+    )
+    {
+        if ((byte)type >> 4 == 0xC) // Collections
+        {
+            uint offset = ReadValue<uint>(ref ptr, reverse);
+            return ReadNodeByRef(ref byaml, start, offset, reverse)!;
+        }
+
+        BYAMLNode node = new(type, byaml.IsMKBYAML);
+
+        switch (type)
+        {
+            case BYAMLNodeType.String:
+            {
+                if (
+                    byaml.StringTable is null
+                    || byaml.StringTable.NodeType != BYAMLNodeType.StringTable
+                )
+                    break;
+
+                string[] table = byaml.StringTable.GetValueAs<string[]>()!;
+                uint index = ReadValue<uint>(ref ptr, reverse);
+
+                if (table.Length <= index)
+                    break;
+
+                node.Value = table[index];
+                break;
+            }
+
+            case BYAMLNodeType.Binary:
+            {
+                if (byaml.IsMKBYAML)
+                {
+                    if (
+                        byaml.PathTable is null
+                        || byaml.PathTable.Value is not BYAMLMKPathPoint[][] table
+                    )
+                        break;
+
+                    uint index = ReadValue<uint>(ref ptr, reverse);
+
+                    node.Value = table[index];
+                    break;
+                }
+
+                // Version 4+:
+                uint offset = ReadValue<uint>(ref ptr, reverse);
+
+                node.Value = ReadBinaryDataByRef(start, offset, reverse);
+                break;
+            }
+
+            case BYAMLNodeType.Bool:
+                node.Value = ReadValue<uint>(ref ptr, reverse) == 1;
+                break;
+
+            case BYAMLNodeType.Int:
+                node.Value = ReadValue<int>(ref ptr, reverse);
+                break;
+
+            case BYAMLNodeType.Float:
+                node.Value = ReadValue<float>(ref ptr, reverse);
+                break;
+
+            case BYAMLNodeType.UInt:
+                node.Value = ReadValue<uint>(ref ptr, reverse);
+                break;
+
+            case BYAMLNodeType.Int64:
+            {
+                uint offset = ReadValue<uint>(ref ptr, reverse);
+                node.Value = ReadNodeValueByRef<long>(start, offset, reverse);
+                break;
+            }
+
+            case BYAMLNodeType.UInt64:
+            {
+                uint offset = ReadValue<uint>(ref ptr, reverse);
+                node.Value = ReadNodeValueByRef<ulong>(start, offset, reverse);
+                break;
+            }
+
+            case BYAMLNodeType.Double:
+            {
+                uint offset = ReadValue<uint>(ref ptr, reverse);
+                node.Value = ReadNodeValueByRef<double>(start, offset, reverse);
+                break;
+            }
+        }
+
+        return node;
+    }
+
+    private static unsafe BYAMLNode? ReadNodeByRef(
+        ref BYAML byaml,
+        byte* start,
+        uint offset,
+        bool reverse
+    )
+    {
+        if (offset < 16)
+            return null;
+
+        if (!s_byRefNodes.TryGetValue(offset, out BYAMLNode? node))
+            node = ReadCollectionNode(ref byaml, start + offset, start, reverse);
+
+        return node;
+    }
+
+    private static unsafe BYAMLNode ReadCollectionNode(
+        ref BYAML byaml,
+        byte* ptr,
+        byte* start,
+        bool reverse
+    ) => ReadCollectionNode(ref byaml, ref ptr, start, reverse);
+
+    private static unsafe BYAMLNode ReadCollectionNode(
+        ref BYAML byaml,
+        ref byte* ptr,
+        byte* start,
+        bool reverse
+    )
+    {
+        BYAMLNodeType nodeType = ReadValue<BYAMLNodeType>(ref ptr, reverse);
+        uint count = ReadValue<UInt24>(ref ptr, reverse).ToUInt32();
+
+        BYAMLNode node = new(nodeType, byaml.IsMKBYAML);
+
+        switch (nodeType)
+        {
+            case BYAMLNodeType.Array:
+            {
+                BYAMLNode[] array = new BYAMLNode[count];
+                BYAMLNodeType[] subTypes = ReadValues<BYAMLNodeType>(ref ptr, reverse, count);
+
+                uint relPos = (uint)(ptr - start);
+
+                // Align to 4 bytes:
+                if (relPos % 4 != 0)
+                {
+                    ulong multiple = relPos / 4 + 1;
+                    ptr = start + (4 * multiple);
+                }
+
+                for (int i = 0; i < subTypes.Length; i++)
+                    array[i] = ReadNode(ref byaml, ref ptr, start, subTypes[i], reverse);
+
+                node.Value = array;
+                break;
+            }
+
+            case BYAMLNodeType.Dictionary:
+            {
+                Dictionary<string, BYAMLNode> dict = new();
+
+                for (uint i = 0; i < count; i++)
+                {
+                    uint keyIndex = ReadValue<UInt24>(ref ptr, reverse).ToUInt32();
+
+                    string key = string.Empty;
+
+                    if (
+                        byaml.DictionaryKeyTable is not null
+                        && byaml.DictionaryKeyTable.Value is List<string> table
+                    )
+                        key = table[(int)keyIndex];
+
+                    BYAMLNodeType valueType = ReadValue<BYAMLNodeType>(ref ptr, reverse);
+
+                    BYAMLNode value = ReadNode(ref byaml, ref ptr, start, valueType, reverse);
+
+                    dict.Add(key, value);
+                }
+
+                node.Value = dict;
+                break;
+            }
+
+            case BYAMLNodeType.StringTable:
+            {
+                string[] array = new string[count];
+
+                byte* tableStart = ptr - 4;
+
+                for (uint i = 0; i < count; i++)
+                {
+                    uint startOffset = ReadValue<uint>(ref ptr, reverse);
+                    uint endOffset = ReadValue<uint>(ref ptr, reverse);
+
+                    uint length = endOffset - startOffset - 1;
+
+                    ptr -= 4;
+
+                    byte* stringPos = tableStart + startOffset;
+
+                    array[i] = byaml.Encoding.GetString(stringPos, (int)length);
+                }
+
+                node.Value = array;
+                break;
+            }
+
+            case BYAMLNodeType.PathTable:
+            {
+                BYAMLMKPathPoint[][] array = new BYAMLMKPathPoint[count][];
+
+                byte* tableStart = ptr - 4;
+
+                for (uint i = 0; i < count; i++)
+                {
+                    uint startOffset = ReadValue<uint>(ref ptr, reverse);
+                    uint endOffset = ReadValue<uint>(ref ptr, reverse);
+
+                    ptr -= 4;
+
+                    // sizeof(BYAMLMKPathPoint) == 28
+                    uint pointCount = (endOffset - startOffset) / 28;
+
+                    BYAMLMKPathPoint[] path = new BYAMLMKPathPoint[pointCount];
+                    byte* pathptr = tableStart + startOffset;
+
+                    for (uint j = 0; i < pointCount; j++)
+                    {
+                        BYAMLMKPathPoint point =
+                            new()
+                            {
+                                Position = new(ReadValues<float>(ref pathptr, reverse, 3)),
+                                Normal = new(ReadValues<float>(ref pathptr, reverse, 3)),
+                                Unknown = ReadValue<uint>(ref pathptr, reverse)
+                            };
+
+                        path[j] = point;
+                    }
+
+                    array[i] = path;
+                }
+
+                node.Value = array;
+                break;
+            }
+        }
+
+        return node;
+    }
+
+    private static unsafe BYAMLNodeType ReadNodeTypeByRef(byte* start, uint offset)
+    {
+        byte* ptr = start + offset;
+
+        return ReadValue<BYAMLNodeType>(ref ptr, false);
+    }
+
+    private static unsafe T ReadNodeValueByRef<T>(byte* start, uint offset, bool reverse)
+        where T : unmanaged
+    {
+        byte* ptr = start + offset;
+
+        return ReadValue<T>(ref ptr, reverse);
+    }
+
+    private static unsafe byte[] ReadBinaryDataByRef(byte* start, uint offset, bool reverse)
+    {
+        byte* ptr = start + offset;
+
+        int length = ReadValue<int>(ref ptr, reverse);
+
+        return new Span<byte>(ptr, length).ToArray();
+    }
+
+    private static void GenerateTables(
+        BYAMLNode root,
+        bool isMKBYAML,
+        out BYAMLNode? keyTable,
+        out BYAMLNode? strTable,
+        out BYAMLNode? pathTable
+    )
+    {
+        keyTable = null;
+        strTable = null;
+        pathTable = null;
+
+        if (!root.IsNodeCollection())
+            return;
+
+        IEnumerable<BYAMLNode> nodes;
+
+        if (isMKBYAML)
+            nodes = root.SearchFromHere(
+                BYAMLNodeType.Dictionary,
+                BYAMLNodeType.String,
+                BYAMLNodeType.Binary
+            );
+        else
+            nodes = root.SearchFromHere(BYAMLNodeType.Dictionary, BYAMLNodeType.String);
+
+        List<string> keys = new();
+        List<string> strings = new();
+        List<BYAMLMKPathPoint[]> paths = new();
+
+        if (
+            root.NodeType == BYAMLNodeType.Dictionary
+            && root.Value is Dictionary<string, BYAMLNode> rootDict
+        )
+            keys.AddRange(rootDict.Keys);
+
+        foreach (BYAMLNode node in nodes)
+            switch (node.NodeType)
+            {
+                case BYAMLNodeType.Dictionary:
+                    Dictionary<string, BYAMLNode> dict = (Dictionary<string, BYAMLNode>)node.Value!;
+
+                    keys.AddRange(dict.Keys);
+                    break;
+
+                case BYAMLNodeType.String:
+                    strings.Add((string)node.Value!);
+                    break;
+
+                case BYAMLNodeType.Binary:
+                    paths.Add((BYAMLMKPathPoint[])node.Value!);
+                    break;
+            }
+
+        if (keys.Count > 0)
+            keyTable = new(BYAMLNodeType.StringTable) { Value = keys.ToArray() };
+
+        if (strings.Count > 0)
+            strTable = new(BYAMLNodeType.StringTable) { Value = strings.ToArray() };
+
+        if (paths.Count > 0)
+            pathTable = new(BYAMLNodeType.PathTable) { Value = paths.ToArray() };
+    }
+
+    private static uint CalculateTotalSize(in BYAML byaml)
+    {
+        uint total = 16;
+
+        if (byaml.IsMKBYAML)
+            total += 4;
+
+        if (byaml.DictionaryKeyTable is not null)
+            total += CalculateNodeSize(byaml.DictionaryKeyTable, in byaml);
+
+        if (byaml.StringTable is not null)
+            total += CalculateNodeSize(byaml.StringTable, in byaml);
+
+        if (byaml.PathTable is not null)
+            total += CalculateNodeSize(byaml.PathTable, in byaml);
+
+        if (byaml.RootNode is not null)
+            total += CalculateNodeSize(byaml.RootNode, in byaml);
+
+        return total;
+    }
+
+    private static uint CalculateNodeSize(BYAMLNode node, in BYAML byaml)
+    {
+        uint size = 4;
+
+        switch (node.Value)
+        {
+            case object v when v is Dictionary<string, BYAMLNode> dict:
+                size += ((uint)dict.Count) * 8;
+
+                foreach (BYAMLNode entry in dict.Values)
+                    size += CalculateNodeSize(entry, in byaml);
+
+                break;
+
+            case object v when v is BYAMLNode[] array:
+                size += (uint)array.Length;
+
+                AlignTo4Bytes(ref size);
+
+                size += (uint)array.Length * 4;
+
+                foreach (BYAMLNode entry in array)
+                    size += CalculateNodeSize(entry, in byaml);
+
+                break;
+
+            case object v when v is List<string> strings:
+                size += ((uint)strings.Count + 1) * 4;
+
+                foreach (string entry in strings)
+                    size += (uint)byaml.Encoding.GetByteCount(entry) + 1;
+
+                AlignTo4Bytes(ref size);
+
+                break;
+
+            case object v when v is BYAMLMKPathPoint[][] pathTable:
+                size += ((uint)pathTable.Length + 1) * 4;
+
+                foreach (BYAMLMKPathPoint[] path in pathTable)
+                    size += ((uint)path.Length) * 28;
+
+                break;
+
+            case object v when v is byte[] data:
+                size += (uint)data.Length;
+
+                AlignTo4Bytes(ref size);
+                break;
+
+            case object v when v is long || v is ulong || v is double:
+                return 8;
+
+            default:
+                return 0;
+        }
+
+        return size;
+
+        static void AlignTo4Bytes(ref uint size)
+        {
+            if (size % 4 == 0)
+                return;
+
+            uint last = size / 4;
+            size = ++last * 4;
+        }
+    }
+
+    private static unsafe void WriteNode(
+        ref byte* ptr,
+        byte* start,
+        BYAMLNode? node,
+        in BYAML byaml,
+        bool reverse
+    )
+    {
+        if (node is null)
+            return;
+
+        switch (node.Value)
+        {
+            case object v when v is string str:
+                if (byaml.StringTable is null)
+                {
+                    ptr += 4;
+                    break;
+                }
+
+                string[] strTable = byaml.StringTable.GetValueAs<string[]>()!;
+
+                WriteValue(ref ptr, Array.IndexOf(strTable, str), reverse);
+                break;
+
+            case object v when v is BYAMLMKPathPoint[] path:
+                if (byaml.PathTable is null)
+                {
+                    ptr += 4;
+                    break;
+                }
+
+                BYAMLMKPathPoint[][] pathTable =
+                    byaml.PathTable.GetValueAs<BYAMLMKPathPoint[][]>()!;
+
+                WriteValue(ref ptr, Array.IndexOf(pathTable, path), reverse);
+                break;
+
+            case object v when v is bool cond:
+                WriteValue(ref ptr, cond ? 1 : 0, reverse);
+                break;
+
+            case object v when v is int int32:
+                WriteValue(ref ptr, int32, reverse);
+                break;
+
+            case object v when v is float single:
+                WriteValue(ref ptr, single, reverse);
+                break;
+
+            case object v when v is uint uint32:
+                WriteValue(ref ptr, uint32, reverse);
+                break;
+
+            case object v
+                when v is Array
+                    || v is Dictionary<string, BYAMLNode>
+                    || v is long
+                    || v is ulong
+                    || v is double:
+
+                s_byRefValues.Add(((uint)(ptr - start), v));
+                ptr += 4;
+                break;
+
+            case object v1 when v1 is null:
+                ptr += 4;
+                break;
+        }
+    }
+
+    private static unsafe void WriteNodeRefValue(
+        ref byte* ptr,
+        byte* start,
+        uint offset,
+        object value,
+        in BYAML byaml,
+        bool reverse
+    )
+    {
+        byte* nodeptr = start + offset;
+        WriteValue(ref nodeptr, (uint)(start - ptr), reverse);
+
+        switch (value)
+        {
+            case object v when v is BYAMLNode[] array:
+                WriteValue(ref ptr, BYAMLNodeType.Array, reverse);
+                WriteValue(ref ptr, new UInt24(array.Length), reverse);
+
+                byte* typesPtr = ptr;
+
+                ptr += array.Length;
+                AlignPtr(ref ptr, start, 4);
+
+                foreach (BYAMLNode node in array)
+                {
+                    WriteValue(ref typesPtr, node.NodeType, reverse);
+
+                    WriteNode(ref ptr, start, node, in byaml, reverse);
+                }
+
+                break;
+
+            case object v when v is Dictionary<string, BYAMLNode> dict:
+                if (byaml.DictionaryKeyTable is null)
+                    break;
+
+                string[] dictKeyTable = byaml.DictionaryKeyTable.GetValueAs<string[]>()!;
+
+                WriteValue(ref ptr, BYAMLNodeType.Dictionary, reverse);
+                WriteValue(ref ptr, new UInt24(dict.Count), reverse);
+
+                foreach (KeyValuePair<string, BYAMLNode> pair in dict)
+                {
+                    int index = Array.IndexOf(dictKeyTable, pair.Key);
+
+                    WriteValue(ref ptr, new UInt24(index), reverse);
+                    WriteValue(ref ptr, pair.Value.NodeType, reverse);
+
+                    WriteNode(ref ptr, start, pair.Value, in byaml, reverse);
+                }
+
+                break;
+
+            case object v when v is string[] array:
+                byte* strTableStart = ptr;
+                byte* strOffsetsPtr = ptr + 4;
+
+                WriteValue(ref ptr, BYAMLNodeType.StringTable, reverse);
+                WriteValue(ref ptr, new UInt24(array.Length), reverse);
+
+                ptr += (array.Length + 1) * 4;
+
+                foreach (string str in array)
+                {
+                    WriteValue(ref strOffsetsPtr, ptr - strTableStart, reverse);
+
+                    WriteValues(ref ptr, byaml.Encoding.GetBytes(str), reverse);
+                    WriteValue<byte>(ref ptr, 0, reverse);
+                }
+
+                WriteValue(ref strOffsetsPtr, ptr - strTableStart, reverse);
+
+                break;
+
+            case object v when v is BYAMLMKPathPoint[][] array:
+                byte* pathTableStart = ptr;
+                byte* pathOffsetsPtr = ptr + 4;
+
+                WriteValue(ref ptr, BYAMLNodeType.StringTable, reverse);
+                WriteValue(ref ptr, new UInt24(array.Length), reverse);
+
+                ptr += (array.Length + 1) * 4;
+
+                foreach (BYAMLMKPathPoint[] path in array)
+                {
+                    WriteValue(ref pathOffsetsPtr, ptr - pathTableStart, reverse);
+
+                    foreach (BYAMLMKPathPoint point in path)
+                    {
+                        WriteValue(ref ptr, point.Position.X, reverse);
+                        WriteValue(ref ptr, point.Position.Y, reverse);
+                        WriteValue(ref ptr, point.Position.Z, reverse);
+
+                        WriteValue(ref ptr, point.Normal.X, reverse);
+                        WriteValue(ref ptr, point.Normal.Y, reverse);
+                        WriteValue(ref ptr, point.Normal.Z, reverse);
+
+                        WriteValue(ref ptr, point.Unknown, reverse);
+                    }
+                }
+
+                WriteValue(ref pathOffsetsPtr, ptr - pathTableStart, reverse);
+
+                break;
+        }
+    }
+
+    private static unsafe void AlignPtr(ref byte* ptr, byte* start, uint value)
+    {
+        uint postition = (uint)(ptr - start);
+
+        if (postition % value == 0)
+            return;
+
+        uint last = postition / value;
+        postition = ++last * value;
+
+        ptr = start + postition;
+    }
+}
