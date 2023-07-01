@@ -32,6 +32,8 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
         if (_isInvalid)
             yield break;
 
+        yield return (_root, _rootInfo);
+
         foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(_root, _rootInfo))
             yield return tuple;
     }
@@ -55,7 +57,7 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
 
                 yield return (entry, entryInfo);
 
-                if (entry.IsNodeCollection())
+                if (entry.IsNodeCollection() && !entryInfo.IsRecursion)
                     foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(node, entryInfo))
                         yield return tuple;
             }
@@ -79,7 +81,7 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
 
                 yield return (entry, entryInfo);
 
-                if (entry.IsNodeCollection())
+                if (entry.IsNodeCollection() && !entryInfo.IsRecursion)
                     foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(node, entryInfo))
                         yield return tuple;
             }
@@ -95,15 +97,15 @@ public class BYAMLNodeIterInfo
 
     internal BYAMLNodeIterInfo(BYAMLNode node, List<int> seenHashes)
     {
-        if (node.IsNodeCollection())
-        {
-            Hash = node.Value!.GetHashCode();
+        if (!node.IsNodeCollection())
+            return;
 
-            if (seenHashes.Contains(Hash))
-                IsRecursion = true;
-            else
-                seenHashes.Add(Hash);
-        }
+        Hash = node.Value!.GetHashCode();
+
+        if (seenHashes.Contains(Hash))
+            IsRecursion = true;
+        else
+            seenHashes.Add(Hash);
     }
 
     /// <summary>

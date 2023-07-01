@@ -4,12 +4,16 @@ namespace BYAMLSharp;
 
 public struct BYAML
 {
-    public BYAML(bool isMKBYAML = false) => IsMKBYAML = isMKBYAML;
+    public BYAML(Encoding? encoding = null, bool isMKBYAML = false)
+    {
+        IsMKBYAML = isMKBYAML;
+        Encoding = encoding ?? Encoding.UTF8;
+    }
 
     public bool IsMKBYAML { get; internal set; }
     public bool IsBigEndian { get; set; } = false;
 
-    public Encoding Encoding { get; set; } = Encoding.UTF8;
+    public Encoding Encoding { get; set; }
 
     public const ushort Magic = 0x4259;
 

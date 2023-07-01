@@ -7,8 +7,8 @@ public static class BYAMLNodeFinder
         if (!node.IsNodeCollection())
             yield break;
 
-        foreach (var (subNode, _) in node.IterateFromHere())
-            if (type.Contains(subNode.NodeType))
+        foreach (var (subNode, subNodeInfo) in node.IterateFromHere())
+            if (type.Contains(subNode.NodeType) && !subNodeInfo.IsRecursion)
                 yield return subNode;
     }
 }

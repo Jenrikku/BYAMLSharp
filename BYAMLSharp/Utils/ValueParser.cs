@@ -57,7 +57,7 @@ internal static class ValueParser
 
         fixed (byte* valueptr = bytes)
             for (int i = 0; i < size; i++, ptr++)
-                *ptr = *valueptr;
+                *ptr = valueptr[i];
     }
 
     public static unsafe void WriteValues<T>(ref byte* ptr, T[] values, bool reverse)
