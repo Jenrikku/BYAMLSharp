@@ -19,8 +19,8 @@ public struct BYAML
 
     public uint Version { get; set; } = 1;
 
-    public BYAMLNode? DictionaryKeyTable { get; internal set; }
-    public BYAMLNode? StringTable { get; internal set; }
-    public BYAMLNode? PathTable { get; internal set; }
-    public BYAMLNode? RootNode { get; set; }
+    public BYAMLNode DictionaryKeyTable { get; internal set; }
+    public BYAMLNode StringTable { get; internal set; }
+    public BYAMLNode PathTable { get; internal set; }
+    public BYAMLNode RootNode { get; set; }
 }

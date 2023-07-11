@@ -3,7 +3,6 @@ using BYAMLSharp.Utils;
 using static BYAMLSharp.Utils.ValueParser;
 
 using System.Text;
-using System.Runtime.InteropServices.Marshalling;
 
 namespace BYAMLSharp;
 
@@ -11,7 +10,7 @@ public static class BYAMLParser
 {
     private static readonly Dictionary<uint, BYAMLNode> s_byRefNodes = new();
 
-    private static readonly Dictionary<int, uint> s_byRefWrittenValues = new(); // Hash, ValuePos
+    private static readonly Dictionary<object, uint> s_byRefWrittenValues = new(); // Value, ValuePos
     private static readonly List<(uint NodePos, object Value)> s_byRefValues = new();
 
     public static unsafe BYAML Read(ReadOnlySpan<byte> data, Encoding? encoding = null)
@@ -99,9 +98,9 @@ public static class BYAMLParser
         GenerateTables(
             byaml.RootNode,
             byaml.IsMKBYAML,
-            out BYAMLNode? keyTableNode,
-            out BYAMLNode? strTableNode,
-            out BYAMLNode? pathTableNode
+            out BYAMLNode keyTableNode,
+            out BYAMLNode strTableNode,
+            out BYAMLNode pathTableNode
         );
 
         byaml.DictionaryKeyTable = keyTableNode;
@@ -117,9 +116,7 @@ public static class BYAMLParser
         {
             var (pos, value) = s_byRefValues[0];
 
-            int hash = value.GetHashCode();
-
-            if (s_byRefWrittenValues.TryGetValue(hash, out uint valueOffset))
+            if (s_byRefWrittenValues.TryGetValue(value, out uint valueOffset))
             {
                 byte* valueptr = start + valueOffset;
 
@@ -127,7 +124,7 @@ public static class BYAMLParser
             }
             else
             {
-                s_byRefWrittenValues.Add(hash, (uint)(start - ptr));
+                s_byRefWrittenValues.Add(value, (uint)(start - ptr));
 
                 WriteNodeRefValue(ref ptr, start, pos, value, in byaml, reverse);
             }
@@ -236,7 +233,7 @@ public static class BYAMLParser
         return node;
     }
 
-    private static unsafe BYAMLNode? ReadNodeByRef(
+    private static unsafe BYAMLNode ReadNodeByRef(
         ref BYAML byaml,
         byte* start,
         uint offset,
@@ -244,10 +241,13 @@ public static class BYAMLParser
     )
     {
         if (offset < 16)
-            return null;
+            return new(BYAMLNodeType.Null);
 
         if (!s_byRefNodes.TryGetValue(offset, out BYAMLNode? node))
+        {
             node = ReadCollectionNode(ref byaml, start + offset, start, reverse);
+            s_byRefNodes.Add(offset, node);
+        }
 
         return node;
     }
@@ -278,7 +278,7 @@ public static class BYAMLParser
                 BYAMLNode[] array = new BYAMLNode[count];
                 BYAMLNodeType[] subTypes = ReadValues<BYAMLNodeType>(ref ptr, reverse, count);
 
-                uint relPos = (uint)(ptr - start);
+                ulong relPos = (ulong)(ptr - start);
 
                 // Align to 4 bytes:
                 if (relPos % 4 != 0)
@@ -415,14 +415,14 @@ public static class BYAMLParser
     private static void GenerateTables(
         BYAMLNode root,
         bool isMKBYAML,
-        out BYAMLNode? keyTable,
-        out BYAMLNode? strTable,
-        out BYAMLNode? pathTable
+        out BYAMLNode keyTable,
+        out BYAMLNode strTable,
+        out BYAMLNode pathTable
     )
     {
-        keyTable = null;
-        strTable = null;
-        pathTable = null;
+        keyTable = new(BYAMLNodeType.Null);
+        strTable = new(BYAMLNodeType.Null);
+        pathTable = new(BYAMLNodeType.Null);
 
         if (!root.IsNodeCollection())
             return;
@@ -448,7 +448,10 @@ public static class BYAMLParser
                 case BYAMLNodeType.Dictionary:
                     Dictionary<string, BYAMLNode> dict = (Dictionary<string, BYAMLNode>)node.Value!;
 
-                    keys.AddRange(dict.Keys);
+                    foreach (string key in dict.Keys)
+                        if (!keys.Contains(key))
+                            keys.Add(key);
+
                     break;
 
                 case BYAMLNodeType.String:

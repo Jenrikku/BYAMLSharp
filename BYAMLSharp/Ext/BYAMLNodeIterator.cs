@@ -11,7 +11,7 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
     /// <summary>
     /// A list used to take track of any recursive values.
     /// </summary>
-    private readonly List<int> _seenHashes = new();
+    private readonly List<object> _seenValues = new();
 
     public BYAMLNodeIterator(BYAMLNode root)
     {
@@ -24,13 +24,15 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
         }
 
         _root = root;
-        _rootInfo = new(root, _seenHashes);
+        _rootInfo = new(root, _seenValues);
     }
 
     public IEnumerator<(BYAMLNode Node, BYAMLNodeIterInfo Info)> GetEnumerator()
     {
         if (_isInvalid)
             yield break;
+
+        _seenValues.Clear();
 
         yield return (_root, _rootInfo);
 
@@ -43,9 +45,6 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
         BYAMLNodeIterInfo info
     )
     {
-        if (!node.IsNodeCollection())
-            yield break;
-
         if (node.NodeType == BYAMLNodeType.Array)
         {
             BYAMLNode[] array = node.GetValueAs<BYAMLNode[]>()!;
@@ -53,7 +52,7 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
             foreach (BYAMLNode entry in array)
             {
                 BYAMLNodeIterInfo entryInfo =
-                    new(entry, _seenHashes) { Parent = node, ParentInfo = info };
+                    new(entry, _seenValues) { Parent = node, ParentInfo = info };
 
                 yield return (entry, entryInfo);
 
@@ -72,7 +71,7 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
                 BYAMLNode entry = pair.Value;
 
                 BYAMLNodeIterInfo entryInfo =
-                    new(entry, _seenHashes)
+                    new(entry, _seenValues)
                     {
                         Parent = node,
                         ParentInfo = info,
@@ -95,23 +94,19 @@ public class BYAMLNodeIterInfo
 {
     internal BYAMLNodeIterInfo() { }
 
-    internal BYAMLNodeIterInfo(BYAMLNode node, List<int> seenHashes)
+    internal BYAMLNodeIterInfo(BYAMLNode node, List<object> seenObjects)
     {
         if (!node.IsNodeCollection())
             return;
 
-        Hash = node.Value!.GetHashCode();
+        object value = node.Value!;
 
-        if (seenHashes.Contains(Hash))
+        if (seenObjects.Contains(value))
             IsRecursion = true;
         else
-            seenHashes.Add(Hash);
+            seenObjects.Add(value);
     }
 
-    /// <summary>
-    /// The HashCode of the node's value. (Only applicable to node collections)
-    /// </summary>
-    public int Hash;
     public BYAMLNode? Parent;
     public BYAMLNodeIterInfo? ParentInfo;
 
