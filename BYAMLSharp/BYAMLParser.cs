@@ -36,9 +36,8 @@ public static class BYAMLParser
         byaml.Version = ReadValue<ushort>(ref ptr, diffByteOrder);
 
         uint[] offsets = new uint[4];
-        byte count = 3;
 
-        for (byte i = 0; i < count; i++)
+        for (byte i = 0; i < 4; i++)
         {
             // MK's BYAML Check:
             if (i == 2)
@@ -51,7 +50,6 @@ public static class BYAMLParser
                 if (type != BYAMLNodeType.PathTable)
                     continue;
 
-                count++;
                 byaml.IsMKBYAML = true;
             }
 
