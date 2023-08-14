@@ -8,7 +8,7 @@ public static class BYAMLNodeFinder
             yield break;
 
         foreach (var (subNode, subNodeInfo) in node.IterateFromHere())
-            if (type.Contains(subNode.NodeType) && !subNodeInfo.IsRecursion)
+            if (type.Contains(subNode.NodeType) && !subNodeInfo.Duplicated)
                 yield return subNode;
     }
 }

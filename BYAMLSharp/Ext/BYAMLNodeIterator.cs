@@ -34,8 +34,6 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
 
         _seenValues.Clear();
 
-        yield return (_root, _rootInfo);
-
         foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(_root, _rootInfo))
             yield return tuple;
     }
@@ -45,6 +43,8 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
         BYAMLNodeIterInfo info
     )
     {
+        yield return (node, info);
+
         if (node.NodeType == BYAMLNodeType.Array)
         {
             BYAMLNode[] array = node.GetValueAs<BYAMLNode[]>()!;
@@ -54,10 +54,8 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
                 BYAMLNodeIterInfo entryInfo =
                     new(entry, _seenValues) { Parent = node, ParentInfo = info };
 
-                yield return (entry, entryInfo);
-
-                if (entry.IsNodeCollection() && !entryInfo.IsRecursion)
-                    foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(node, entryInfo))
+                if (!entryInfo.Duplicated)
+                    foreach (var tuple in EnumerateNode(entry, entryInfo))
                         yield return tuple;
             }
         }
@@ -78,10 +76,8 @@ public class BYAMLNodeIterator : IEnumerable<(BYAMLNode Node, BYAMLNodeIterInfo 
                         Key = pair.Key
                     };
 
-                yield return (entry, entryInfo);
-
-                if (entry.IsNodeCollection() && !entryInfo.IsRecursion)
-                    foreach ((BYAMLNode, BYAMLNodeIterInfo) tuple in EnumerateNode(node, entryInfo))
+                if (!entryInfo.Duplicated)
+                    foreach (var tuple in EnumerateNode(entry, entryInfo))
                         yield return tuple;
             }
         }
@@ -102,7 +98,7 @@ public class BYAMLNodeIterInfo
         object value = node.Value!;
 
         if (seenObjects.Contains(value))
-            IsRecursion = true;
+            Duplicated = true;
         else
             seenObjects.Add(value);
     }
@@ -113,7 +109,7 @@ public class BYAMLNodeIterInfo
     /// <summary>
     /// Tells whether this entry has appeared before. (Only applicable to node collections)
     /// </summary>
-    public bool IsRecursion = false;
+    public bool Duplicated = false;
 
     /// <summary>
     /// If the parent node is a dictionary, this is the key the child has in it.
@@ -121,5 +117,5 @@ public class BYAMLNodeIterInfo
     public string Key = string.Empty;
 
     public bool IsRoot => Parent is null;
-    public BYAMLNodeType ParentType => Parent is null ? BYAMLNodeType.Null : Parent.NodeType;
+    public BYAMLNodeType ParentType => Parent?.NodeType ?? BYAMLNodeType.Null;
 }
