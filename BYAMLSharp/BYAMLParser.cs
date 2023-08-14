@@ -706,13 +706,13 @@ public static class BYAMLParser
 
                 foreach (string str in array)
                 {
-                    WriteValue(ref strOffsetsPtr, ptr - strTableStart, reverse);
+                    WriteValue(ref strOffsetsPtr, (uint)(ptr - strTableStart), reverse);
 
                     WriteValues(ref ptr, byaml.Encoding.GetBytes(str), reverse);
                     WriteValue<byte>(ref ptr, 0, reverse);
                 }
 
-                WriteValue(ref strOffsetsPtr, ptr - strTableStart, reverse);
+                WriteValue(ref strOffsetsPtr, (uint)(ptr - strTableStart), reverse);
 
                 break;
 
@@ -727,7 +727,7 @@ public static class BYAMLParser
 
                 foreach (BYAMLMKPathPoint[] path in array)
                 {
-                    WriteValue(ref pathOffsetsPtr, ptr - pathTableStart, reverse);
+                    WriteValue(ref pathOffsetsPtr, (uint)(ptr - pathTableStart), reverse);
 
                     foreach (BYAMLMKPathPoint point in path)
                     {
@@ -743,7 +743,7 @@ public static class BYAMLParser
                     }
                 }
 
-                WriteValue(ref pathOffsetsPtr, ptr - pathTableStart, reverse);
+                WriteValue(ref pathOffsetsPtr, (uint)(ptr - pathTableStart), reverse);
 
                 break;
 
@@ -758,6 +758,11 @@ public static class BYAMLParser
             case object v when v is double num:
                 WriteValue(ref ptr, num, reverse);
                 return;
+
+            case object v when v is byte[] data:
+                WriteValue(ref ptr, data.Length, reverse);
+                WriteValues(ref ptr, data, false);
+                return;
         }
 
         AlignPtr(ref ptr, start, 4);
@@ -771,14 +776,14 @@ public static class BYAMLParser
 
     private static unsafe void AlignPtr(ref byte* ptr, byte* start, uint value)
     {
-        uint postition = (uint)(ptr - start);
+        uint position = (uint)(ptr - start);
 
-        if (postition % value == 0)
+        if (position % value == 0)
             return;
 
-        uint last = postition / value;
-        postition = ++last * value;
+        uint last = position / value;
+        position = ++last * value;
 
-        ptr = start + postition;
+        ptr = start + position;
     }
 }
