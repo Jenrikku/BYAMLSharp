@@ -11,7 +11,7 @@ public static class BYAMLParser
     private static readonly Dictionary<uint, BYAMLNode> s_byRefNodes = new();
 
     private static readonly Dictionary<object, uint> s_byRefWrittenValues = new(); // Value, ValuePos
-    private static readonly List<(uint NodePos, object Value)> s_byRefValues = new();
+    private static readonly Dictionary<uint, object> s_byRefValues = new(); // NodePos, Value
 
     public static unsafe BYAML Read(ReadOnlySpan<byte> data, Encoding? encoding = null)
     {
@@ -19,7 +19,30 @@ public static class BYAMLParser
             return Read(ptr, encoding);
     }
 
-    public static unsafe BYAML Read(byte* start, Encoding? encoding = null)
+    public static unsafe byte[] Write(BYAML byaml)
+    {
+        GenerateTables(
+            byaml.RootNode,
+            byaml.IsMKBYAML,
+            out BYAMLNode keyTableNode,
+            out BYAMLNode strTableNode,
+            out BYAMLNode pathTableNode
+        );
+
+        byaml.DictionaryKeyTable = keyTableNode;
+        byaml.StringTable = strTableNode;
+        byaml.PathTable = pathTableNode;
+
+        uint size = CalculateTotalSize(in byaml);
+        byte[] data = new byte[size];
+
+        fixed (byte* ptr = data)
+            Write(byaml, ptr);
+
+        return data;
+    }
+
+    private static unsafe BYAML Read(byte* start, Encoding? encoding = null)
     {
         s_byRefNodes.Clear();
 
@@ -67,18 +90,7 @@ public static class BYAMLParser
         return byaml;
     }
 
-    public static unsafe byte[] Write(in BYAML byaml)
-    {
-        uint size = CalculateTotalSize(in byaml);
-        byte[] data = new byte[size];
-
-        fixed (byte* ptr = data)
-            Write(byaml, ptr);
-
-        return data;
-    }
-
-    public static unsafe void Write(BYAML byaml, byte* start)
+    private static unsafe void Write(BYAML byaml, byte* start)
     {
         s_byRefWrittenValues.Clear();
         s_byRefValues.Clear();
@@ -90,29 +102,21 @@ public static class BYAMLParser
         WriteValue(ref ptr, BYAML.Magic, reverse);
         WriteValue(ref ptr, byaml.Version, reverse);
 
-        if (byaml.RootNode is null)
+        if (byaml.RootNode.NodeType == BYAMLNodeType.Null)
             return;
 
-        GenerateTables(
-            byaml.RootNode,
-            byaml.IsMKBYAML,
-            out BYAMLNode keyTableNode,
-            out BYAMLNode strTableNode,
-            out BYAMLNode pathTableNode
-        );
+        WriteNode(ref ptr, start, byaml.DictionaryKeyTable, in byaml, reverse);
+        WriteNode(ref ptr, start, byaml.StringTable, in byaml, reverse);
 
-        byaml.DictionaryKeyTable = keyTableNode;
-        byaml.StringTable = strTableNode;
-        byaml.PathTable = pathTableNode;
+        if (byaml.IsMKBYAML)
+            WriteNode(ref ptr, start, byaml.PathTable, in byaml, reverse);
 
-        WriteNode(ref ptr, start, keyTableNode, in byaml, reverse);
-        WriteNode(ref ptr, start, strTableNode, in byaml, reverse);
-        WriteNode(ref ptr, start, pathTableNode, in byaml, reverse);
         WriteNode(ref ptr, start, byaml.RootNode, in byaml, reverse);
 
         while (s_byRefValues.Count > 0)
         {
-            var (pos, value) = s_byRefValues[0];
+            var (pos, value) = s_byRefValues.First();
+            s_byRefValues.Remove(pos);
 
             if (s_byRefWrittenValues.TryGetValue(value, out uint valueOffset))
             {
@@ -126,8 +130,6 @@ public static class BYAMLParser
 
                 WriteNodeRefValue(ref ptr, start, pos, value, in byaml, reverse);
             }
-
-            s_byRefValues.RemoveAt(0);
         }
     }
 
@@ -527,8 +529,8 @@ public static class BYAMLParser
 
                 break;
 
-            case object v when v is List<string> strings:
-                size += ((uint)strings.Count + 1) * 4;
+            case object v when v is string[] strings:
+                size += ((uint)strings.Length + 1) * 4;
 
                 foreach (string entry in strings)
                     size += (uint)byaml.Encoding.GetByteCount(entry) + 1;
@@ -631,11 +633,11 @@ public static class BYAMLParser
                     || v is ulong
                     || v is double:
 
-                s_byRefValues.Add(((uint)(ptr - start), v));
+                s_byRefValues.Add((uint)(ptr - start), v);
                 ptr += 4;
                 break;
 
-            case object v1 when v1 is null:
+            case object v when v is null:
                 ptr += 4;
                 break;
         }
@@ -744,13 +746,27 @@ public static class BYAMLParser
                 WriteValue(ref pathOffsetsPtr, ptr - pathTableStart, reverse);
 
                 break;
+
+            case object v when v is long int64:
+                WriteValue(ref ptr, int64, reverse);
+                return;
+
+            case object v when v is ulong uint64:
+                WriteValue(ref ptr, uint64, reverse);
+                return;
+
+            case object v when v is double num:
+                WriteValue(ref ptr, num, reverse);
+                return;
         }
+
+        AlignPtr(ref ptr, start, 4);
     }
 
     private static unsafe void WriteNodeOffset(byte* ptr, byte* start, uint offset, bool reverse)
     {
         byte* nodeptr = start + offset;
-        WriteValue(ref nodeptr, (uint)(start - ptr), reverse);
+        WriteValue(ref nodeptr, (uint)(ptr - start), reverse);
     }
 
     private static unsafe void AlignPtr(ref byte* ptr, byte* start, uint value)
