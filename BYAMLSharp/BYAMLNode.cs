@@ -11,7 +11,7 @@ public class BYAMLNode
         _value = type switch
         {
             BYAMLNodeType.String => string.Empty,
-            BYAMLNodeType.Binary
+            BYAMLNodeType.BinaryOrPath
                 => isMKBYAML ? Array.Empty<BYAMLMKPathPoint>() : Array.Empty<byte>(),
 
             BYAMLNodeType.Array => Array.Empty<BYAMLNode>(),
@@ -89,7 +89,7 @@ public class BYAMLNode
 public enum BYAMLNodeType : byte
 {
     String = 0xA0,
-    Binary = 0xA1,
+    BinaryOrPath = 0xA1,
     Array = 0xC0,
     Dictionary = 0xC1,
     StringTable = 0xC2,

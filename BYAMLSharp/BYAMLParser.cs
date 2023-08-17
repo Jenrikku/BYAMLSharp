@@ -169,7 +169,7 @@ public static class BYAMLParser
                 break;
             }
 
-            case BYAMLNodeType.Binary:
+            case BYAMLNodeType.BinaryOrPath:
             {
                 if (byaml.IsMKBYAML)
                 {
@@ -433,7 +433,7 @@ public static class BYAMLParser
             nodes = root.SearchFromHere(
                 BYAMLNodeType.Dictionary,
                 BYAMLNodeType.String,
-                BYAMLNodeType.Binary
+                BYAMLNodeType.BinaryOrPath
             );
         else
             nodes = root.SearchFromHere(BYAMLNodeType.Dictionary, BYAMLNodeType.String);
@@ -462,7 +462,7 @@ public static class BYAMLParser
 
                     break;
 
-                case BYAMLNodeType.Binary:
+                case BYAMLNodeType.BinaryOrPath:
                     BYAMLMKPathPoint[] path = node.GetValueAs<BYAMLMKPathPoint[]>()!;
 
                     if (!paths.Contains(path))
