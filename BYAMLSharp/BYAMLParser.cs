@@ -44,8 +44,6 @@ public static class BYAMLParser
 
     private static unsafe BYAML Read(byte* start, Encoding? encoding = null)
     {
-        s_byRefNodes.Clear();
-
         BYAML byaml = new(encoding);
 
         byte* ptr = start;
@@ -79,22 +77,21 @@ public static class BYAMLParser
             offsets[i] = ReadValue<uint>(ref ptr, diffByteOrder);
         }
 
-        byaml.DictionaryKeyTable = ReadNodeByRef(ref byaml, start, offsets[0], diffByteOrder);
+        byaml.DictionaryKeyTable = ReadCollectionByRef(ref byaml, start, offsets[0], diffByteOrder);
 
-        byaml.StringTable = ReadNodeByRef(ref byaml, start, offsets[1], diffByteOrder);
+        byaml.StringTable = ReadCollectionByRef(ref byaml, start, offsets[1], diffByteOrder);
 
-        byaml.PathTable = ReadNodeByRef(ref byaml, start, offsets[2], diffByteOrder);
+        byaml.PathTable = ReadCollectionByRef(ref byaml, start, offsets[2], diffByteOrder);
 
-        byaml.RootNode = ReadNodeByRef(ref byaml, start, offsets[3], diffByteOrder);
+        byaml.RootNode = ReadCollectionByRef(ref byaml, start, offsets[3], diffByteOrder);
+
+        s_byRefNodes.Clear();
 
         return byaml;
     }
 
     private static unsafe void Write(BYAML byaml, byte* start)
     {
-        s_byRefWrittenValues.Clear();
-        s_byRefValues.Clear();
-
         byte* ptr = start;
 
         bool reverse = BitConverter.IsLittleEndian == byaml.IsBigEndian;
@@ -131,6 +128,9 @@ public static class BYAMLParser
                 WriteNodeRefValue(ref ptr, start, pos, value, in byaml, reverse);
             }
         }
+
+        s_byRefWrittenValues.Clear();
+        s_byRefValues.Clear();
     }
 
     private static unsafe BYAMLNode ReadNode(
@@ -144,7 +144,7 @@ public static class BYAMLParser
         if ((byte)type >> 4 == 0xC) // Collections
         {
             uint offset = ReadValue<uint>(ref ptr, reverse);
-            return ReadNodeByRef(ref byaml, start, offset, reverse)!;
+            return ReadCollectionByRef(ref byaml, start, offset, reverse);
         }
 
         BYAMLNode node = new(type, byaml.IsMKBYAML);
@@ -228,12 +228,19 @@ public static class BYAMLParser
                 node.Value = ReadNodeValueByRef<double>(start, offset, reverse);
                 break;
             }
+
+            case BYAMLNodeType.Null:
+                ptr += 4;
+                break;
+
+            default:
+                throw new NotSupportedException($"Unsupported node type: {(byte)type:X2}");
         }
 
         return node;
     }
 
-    private static unsafe BYAMLNode ReadNodeByRef(
+    private static unsafe BYAMLNode ReadCollectionByRef(
         ref BYAML byaml,
         byte* start,
         uint offset,
@@ -243,35 +250,31 @@ public static class BYAMLParser
         if (offset < 16)
             return new(BYAMLNodeType.Null);
 
-        if (!s_byRefNodes.TryGetValue(offset, out BYAMLNode? node))
-        {
-            node = ReadCollectionNode(ref byaml, start + offset, start, reverse);
-            s_byRefNodes.Add(offset, node);
-        }
+        byte* ptr = start + offset;
+
+        BYAMLNodeType nodeType = ReadValue<BYAMLNodeType>(ref ptr, reverse);
+
+        BYAMLNode? node = new(nodeType);
+
+        if (!s_byRefNodes.TryAdd(offset, node))
+            return s_byRefNodes[offset];
+
+        ReadCollectionNode(ref byaml, ref node, ptr, start, reverse);
 
         return node;
     }
 
-    private static unsafe BYAMLNode ReadCollectionNode(
+    private static unsafe void ReadCollectionNode(
         ref BYAML byaml,
+        ref BYAMLNode node,
         byte* ptr,
-        byte* start,
-        bool reverse
-    ) => ReadCollectionNode(ref byaml, ref ptr, start, reverse);
-
-    private static unsafe BYAMLNode ReadCollectionNode(
-        ref BYAML byaml,
-        ref byte* ptr,
         byte* start,
         bool reverse
     )
     {
-        BYAMLNodeType nodeType = ReadValue<BYAMLNodeType>(ref ptr, reverse);
         uint count = ReadValue<UInt24>(ref ptr, reverse).ToUInt32();
 
-        BYAMLNode node = new(nodeType, byaml.IsMKBYAML);
-
-        switch (nodeType)
+        switch (node.NodeType)
         {
             case BYAMLNodeType.Array:
             {
@@ -309,9 +312,13 @@ public static class BYAMLParser
                         && byaml.DictionaryKeyTable.Value is string[] table
                     )
                         key = table[(int)keyIndex];
+                    else
+                        key = keyIndex.ToString();
+
+                    if (dict.ContainsKey(key))
+                        continue;
 
                     BYAMLNodeType valueType = ReadValue<BYAMLNodeType>(ref ptr, reverse);
-
                     BYAMLNode value = ReadNode(ref byaml, ref ptr, start, valueType, reverse);
 
                     dict.Add(key, value);
@@ -384,8 +391,6 @@ public static class BYAMLParser
                 break;
             }
         }
-
-        return node;
     }
 
     private static unsafe BYAMLNodeType ReadNodeTypeByRef(byte* start, uint offset)
