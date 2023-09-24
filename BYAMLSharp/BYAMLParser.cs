@@ -15,6 +15,9 @@ public static class BYAMLParser
 
     public static unsafe BYAML Read(ReadOnlySpan<byte> data, Encoding? encoding = null)
     {
+        if (data.IsEmpty)
+            return new(encoding);
+
         fixed (byte* ptr = data)
             return Read(ptr, encoding);
     }
