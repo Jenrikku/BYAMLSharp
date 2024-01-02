@@ -94,7 +94,7 @@ public class BYAMLBuilder
     {
         _isMK = true;
 
-        AddNode(new(BYAMLNodeType.BinaryOrPath) { Value = path }, key);
+        AddNode(new(BYAMLNodeType.BinaryOrPath, _isMK) { Value = path }, key);
     }
 
     /// <summary>
@@ -103,6 +103,12 @@ public class BYAMLBuilder
     /// <param name="key">Only used when the current node is a dictionary.</param>
     public void AddBinaryData(byte[] value, string? key = null) =>
         AddNode(new(BYAMLNodeType.BinaryOrPath) { Value = value }, key);
+
+    /// <summary>
+    /// Adds a <see cref="null"/> value to the current node.
+    /// </summary>
+    /// <param name="key">Only used when the current node is a dictionary.</param>
+    public void AddNullNode(string? key = null) => AddNode(new(BYAMLNodeType.Null), key);
 
     /// <summary>
     /// Sets the current node to a new array.<br />
@@ -146,6 +152,9 @@ public class BYAMLBuilder
             return false;
 
         _currentNode = _previousNodes[count - 1];
+
+        _previousNodes.RemoveAt(count - 1);
+
         return true;
     }
 
