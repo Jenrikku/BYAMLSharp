@@ -11,4 +11,12 @@ public static class BYAMLExtensions
         this BYAMLNode node,
         params BYAMLNodeType[] types
     ) => BYAMLNodeFinder.Search(node, types);
+
+    /// <returns>null if the node is not a dictionary, otherwise it converts all nodes recursively to objects.</returns>
+    public static Dictionary<string, object?>? AsObjectDictionary(this BYAMLNode node) =>
+        new BYAMLNodeConverter(node).ToDictionary();
+
+    /// <returns>null if the node is not a list, otherwise it converts all nodes recursively to objects.</returns>
+    public static List<object?>? AsObjectList(this BYAMLNode node) =>
+        new BYAMLNodeConverter(node).ToList();
 }
