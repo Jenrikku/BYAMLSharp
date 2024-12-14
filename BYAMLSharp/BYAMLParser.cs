@@ -1,8 +1,7 @@
+using System.Text;
 using BYAMLSharp.Ext;
 using BYAMLSharp.Utils;
 using static BYAMLSharp.Utils.ValueParser;
-
-using System.Text;
 
 namespace BYAMLSharp;
 
@@ -491,27 +490,33 @@ public static class BYAMLParser
 
     private static uint CalculateTotalSize(in BYAML byaml)
     {
+        HashSet<BYAMLNode> references = new();
+
         uint total = 16;
 
         if (byaml.IsMKBYAML)
             total += 4;
 
         if (byaml.DictionaryKeyTable is not null)
-            total += CalculateNodeSize(byaml.DictionaryKeyTable, in byaml);
+            total += CalculateNodeSize(byaml.DictionaryKeyTable, in byaml, references);
 
         if (byaml.StringTable is not null)
-            total += CalculateNodeSize(byaml.StringTable, in byaml);
+            total += CalculateNodeSize(byaml.StringTable, in byaml, references);
 
         if (byaml.PathTable is not null)
-            total += CalculateNodeSize(byaml.PathTable, in byaml);
+            total += CalculateNodeSize(byaml.PathTable, in byaml, references);
 
         if (byaml.RootNode is not null)
-            total += CalculateNodeSize(byaml.RootNode, in byaml);
+            total += CalculateNodeSize(byaml.RootNode, in byaml, references);
 
         return total;
     }
 
-    private static uint CalculateNodeSize(BYAMLNode node, in BYAML byaml)
+    private static uint CalculateNodeSize(
+        BYAMLNode node,
+        in BYAML byaml,
+        HashSet<BYAMLNode> references
+    )
     {
         uint size = 4;
 
@@ -521,7 +526,12 @@ public static class BYAMLParser
                 size += ((uint)dict.Count) * 8;
 
                 foreach (BYAMLNode entry in dict.Values)
-                    size += CalculateNodeSize(entry, in byaml);
+                {
+                    if (!references.Add(entry))
+                        continue;
+
+                    size += CalculateNodeSize(entry, in byaml, references);
+                }
 
                 break;
 
@@ -533,7 +543,12 @@ public static class BYAMLParser
                 size += (uint)array.Length * 4;
 
                 foreach (BYAMLNode entry in array)
-                    size += CalculateNodeSize(entry, in byaml);
+                {
+                    if (!references.Add(entry))
+                        continue;
+
+                    size += CalculateNodeSize(entry, in byaml, references);
+                }
 
                 break;
 
@@ -556,12 +571,18 @@ public static class BYAMLParser
                 break;
 
             case object v when v is byte[] data:
+                if (!references.Add(node))
+                    return 0;
+
                 size += (uint)data.Length;
 
                 AlignTo4Bytes(ref size);
                 break;
 
             case object v when v is long || v is ulong || v is double:
+                if (!references.Add(node))
+                    return 0;
+
                 return 8;
 
             default:
