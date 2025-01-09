@@ -31,6 +31,17 @@ public class BYAMLNode
         };
     }
 
+    public BYAMLNode(BYAMLNodeType type, object? val, bool isMKBYAML = false)
+    {
+        NodeType = type;
+        _value = val;
+    }
+    public BYAMLNode(BYAMLNodeType type, Dictionary<string, BYAMLNode> val)
+    {
+        NodeType = type;
+        _value = val.OrderBy(x => x.Key, StringComparer.Ordinal).ToDictionary();
+    }
+
     public BYAMLNodeType NodeType { get; }
 
     public object? Value

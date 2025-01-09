@@ -479,10 +479,14 @@ public static class BYAMLParser
             }
 
         if (keys.Count > 0)
-            keyTable = new(BYAMLNodeType.StringTable) { Value = keys.ToArray() };
+        {
+            keyTable = new(BYAMLNodeType.StringTable) { Value = keys.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray() };
+            }
 
         if (strings.Count > 0)
-            strTable = new(BYAMLNodeType.StringTable) { Value = strings.ToArray() };
+        {
+            strTable = new(BYAMLNodeType.StringTable) { Value = strings.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray() };
+        }
 
         if (paths.Count > 0)
             pathTable = new(BYAMLNodeType.PathTable) { Value = paths.ToArray() };
