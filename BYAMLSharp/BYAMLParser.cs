@@ -125,7 +125,7 @@ public static class BYAMLParser
             }
             else
             {
-                s_byRefWrittenValues.Add(value, (uint)(start - ptr));
+                s_byRefWrittenValues.Add(value, (uint)(ptr - start));
 
                 WriteNodeRefValue(ref ptr, start, pos, value, in byaml, reverse);
             }
@@ -480,12 +480,18 @@ public static class BYAMLParser
 
         if (keys.Count > 0)
         {
-            keyTable = new(BYAMLNodeType.StringTable, keys.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray());
-            }
+            keyTable = new(
+                BYAMLNodeType.StringTable,
+                keys.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray()
+            );
+        }
 
         if (strings.Count > 0)
         {
-            strTable = new(BYAMLNodeType.StringTable, strings.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray());
+            strTable = new(
+                BYAMLNodeType.StringTable,
+                strings.OrderBy(x => x, StringComparer.Ordinal).ToList().ToArray()
+            );
         }
 
         if (paths.Count > 0)
