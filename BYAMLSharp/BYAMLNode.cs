@@ -35,39 +35,27 @@ public class BYAMLNode
     {
         NodeType = type;
         _value = val;
-        if (GetType(val) != NodeType) throw new("BYAMLNodeType was incorrectly assigned!");
+
+        if (GetType(val) != NodeType)
+            throw new("BYAMLNodeType was incorrectly assigned!");
     }
+
     public BYAMLNode(object? val)
     {
         NodeType = GetType(val);
+
+        if (NodeType == BYAMLNodeType.Null && val is not null)
+            throw new("Invalid node value!");
+
         _value = val;
     }
+
     public BYAMLNode(Dictionary<string, BYAMLNode> val)
     {
         NodeType = BYAMLNodeType.Dictionary;
         _value = val.OrderBy(x => x.Key, StringComparer.Ordinal).ToDictionary();
     }
-    private BYAMLNodeType GetType(object? val)
-    {
-        return val switch
-        {
-            string => BYAMLNodeType.String,
-            BYAMLMKPathPoint[] => BYAMLNodeType.BinaryOrPath,
-            byte[] => BYAMLNodeType.BinaryOrPath,
-            BYAMLNode[] => BYAMLNodeType.Array,
-            Dictionary<string, BYAMLNode> => BYAMLNodeType.Dictionary,
-            string[] => BYAMLNodeType.StringTable,
-            BYAMLMKPathPoint[][] => BYAMLNodeType.PathTable,
-            bool => BYAMLNodeType.Bool,
-            int => BYAMLNodeType.Int,
-            float => BYAMLNodeType.Float,
-            uint => BYAMLNodeType.UInt,
-            long => BYAMLNodeType.Int64,
-            ulong => BYAMLNodeType.UInt64,
-            double => BYAMLNodeType.Double,
-            _ => BYAMLNodeType.Null
-        };
-    }
+
     public BYAMLNodeType NodeType { get; }
 
     public object? Value
@@ -121,6 +109,28 @@ public class BYAMLNode
     ///(Either a dictionary or an array)</returns>
     public bool IsNodeCollection() =>
         NodeType == BYAMLNodeType.Dictionary || NodeType == BYAMLNodeType.Array;
+
+    private static BYAMLNodeType GetType(object? val)
+    {
+        return val switch
+        {
+            string => BYAMLNodeType.String,
+            BYAMLMKPathPoint[] => BYAMLNodeType.BinaryOrPath,
+            byte[] => BYAMLNodeType.BinaryOrPath,
+            BYAMLNode[] => BYAMLNodeType.Array,
+            Dictionary<string, BYAMLNode> => BYAMLNodeType.Dictionary,
+            string[] => BYAMLNodeType.StringTable,
+            BYAMLMKPathPoint[][] => BYAMLNodeType.PathTable,
+            bool => BYAMLNodeType.Bool,
+            int => BYAMLNodeType.Int,
+            float => BYAMLNodeType.Float,
+            uint => BYAMLNodeType.UInt,
+            long => BYAMLNodeType.Int64,
+            ulong => BYAMLNodeType.UInt64,
+            double => BYAMLNodeType.Double,
+            _ => BYAMLNodeType.Null
+        };
+    }
 }
 
 public enum BYAMLNodeType : byte
