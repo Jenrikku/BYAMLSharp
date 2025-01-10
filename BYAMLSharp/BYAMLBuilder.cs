@@ -163,7 +163,7 @@ public class BYAMLBuilder
     /// </summary>
     public BYAML ToBYAML() => new(_rootNode, isMKBYAML: _isMK);
 
-    private void AddNode(BYAMLNode node, string? key)
+    public void AddNode(BYAMLNode node, string? key)
     {
         switch (_currentNode.NodeType)
         {

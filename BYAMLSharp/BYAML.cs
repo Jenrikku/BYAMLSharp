@@ -29,7 +29,14 @@ public struct BYAML
 
     public ushort Version { get; set; } = 1;
 
+    /// <summary>
+    /// DictionaryKeyTable is a StringTable node that includes all the property names in the yaml, keys of the dictionaries
+    /// </summary>
     public BYAMLNode DictionaryKeyTable { get; internal set; } = new(BYAMLNodeType.Null);
+    
+    /// <summary>
+    /// StringTable is a StringTable node that includes all the string values in the yaml, values of the dictionaries that use string 
+    /// </summary>
     public BYAMLNode StringTable { get; internal set; } = new(BYAMLNodeType.Null);
     public BYAMLNode PathTable { get; internal set; } = new(BYAMLNodeType.Null);
     public BYAMLNode RootNode { get; set; }
