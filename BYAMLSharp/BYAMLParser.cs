@@ -676,7 +676,7 @@ public static class BYAMLParser
                 ptr += 4;
                 break;
 
-            case object v when v is null:
+            case null:
                 ptr += 4;
                 break;
         }
