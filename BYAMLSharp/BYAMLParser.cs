@@ -528,7 +528,6 @@ public static class BYAMLParser
             if (encoding.CodePage != Encoding.UTF8.CodePage)
             {
                 rawStrings.Clear();
-                // List<string> teststrings = ["Koopa_クッパ戦闘中", "Koopa_クッパ戦闘終了デモ", "AllRailInfos", "共通", "共通サブ", "未入力４", "未入力０"];
                 foreach (string s in strings)
                 {
                     rawStrings.Add(encoding.GetBytes(s));
