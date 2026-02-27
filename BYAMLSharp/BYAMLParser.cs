@@ -420,6 +420,25 @@ public static class BYAMLParser
         return new Span<byte>(ptr, length).ToArray();
     }
 
+    /// <summary>
+    /// Based on https://stackoverflow.com/questions/30422655/sorting-list-of-list-of-bytes-or-list-of-byte-arrays/30422788#30422788
+    /// </summary>
+    public class ByteComparer : IComparer<byte[]>
+    {
+        public int Compare(byte[] a, byte[] b)
+        {
+            int result;
+            int min = int.Min(a.Length, b.Length);
+            for(int index = 0; index < min; index++)
+            {
+                result = a[index].CompareTo(b[index]);
+                if (result != 0) return result;
+            }
+            return a.Length.CompareTo(b.Length);
+        }
+    }
+
+
     private static void GenerateTables(
         BYAMLNode root,
         Encoding encoding,
@@ -480,21 +499,21 @@ public static class BYAMLParser
                     break;
             }
 
-        Dictionary<string, string> tmpstr = new(); // first string is to be sorted, second is old
+        List<byte[]> rawStrings = new();
         if (keys.Count > 0)
         {
             if (encoding.CodePage != Encoding.UTF8.CodePage) // skip if the strings are already UTF8
             {
                 foreach (string s in keys)
                 {
-                    tmpstr.Add(Encoding.UTF8.GetString(encoding.GetBytes(s)), s);
+                    rawStrings.Add(encoding.GetBytes(s));
                 }
-                var ls = tmpstr.Keys.ToList();
-                ls.Sort(StringComparer.Ordinal);
 
-                for (int s = 0; s < ls.Count; s++)
+                rawStrings = rawStrings.OrderBy(x => x, new ByteComparer()).ToList();
+
+                for (int s = 0; s < rawStrings.Count; s++)
                 {
-                    keys[s] = tmpstr[ls[s]];
+                    keys[s] = encoding.GetString(rawStrings[s]);
                 }
             }
             else keys.Sort(StringComparer.Ordinal);
@@ -508,17 +527,17 @@ public static class BYAMLParser
         {
             if (encoding.CodePage != Encoding.UTF8.CodePage)
             {
-                tmpstr.Clear();
+                rawStrings.Clear();
                 foreach (string s in strings)
                 {
-                    tmpstr.Add(Encoding.UTF8.GetString(encoding.GetBytes(s)), s);
+                    rawStrings.Add(encoding.GetBytes(s));
                 }
-                var ls = tmpstr.Keys.ToList();
-                ls.Sort(StringComparer.Ordinal);
 
-                for (int s = 0; s < ls.Count; s++)
+                rawStrings = rawStrings.OrderBy(x => x, new ByteComparer()).ToList();
+
+                for (int s = 0; s < rawStrings.Count; s++)
                 {
-                    strings[s] = tmpstr[ls[s]];
+                    strings[s] = encoding.GetString(rawStrings[s]);
                 }
             }
             else strings.Sort(StringComparer.Ordinal);
